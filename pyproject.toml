@@ -1,0 +1,32 @@
+[project]
+name = "better-scope"
+version = "2.1.0"
+description = "DearPyGui tool for capturing screenshots, naming channels, and plotting waveforms from Tektronix oscilloscopes via the AlphaOmegaSemiconductor pymeasure fork."
+readme = "README.md"
+requires-python = ">=3.13,<3.14"
+authors = [{ name = "Niel Walker", email = "nielandrewalker@gmail.com" }]
+dependencies = [
+    "dearpygui>=2.3.1",
+    "pymeasure",
+    "pyvisa>=1.13",
+    "pyvisa-py>=0.7",
+    "pillow>=10",
+    "numpy>=1.26",
+    "pywin32>=306; sys_platform == 'win32'",
+]
+
+[project.scripts]
+better-scope = "better_scope.gui.app:main"
+
+[tool.uv.sources]
+pymeasure = { git = "https://github.com/AlphaOmegaSemiconductor/pymeasure" }
+
+[dependency-groups]
+dev = ["pytest>=8"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["better_scope"]

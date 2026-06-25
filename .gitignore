@@ -1,3 +1,6 @@
+# Reference project (not committed; to be deleted after port)
+simple_scope_referance/
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]
