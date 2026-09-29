@@ -1,5 +1,7 @@
 """VISA instrument discovery and ``*IDN?`` parsing."""
 
+__lazy_modules__ = ["pyvisa"]
+
 import logging
 from typing import Any
 

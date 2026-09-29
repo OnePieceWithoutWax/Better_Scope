@@ -10,7 +10,7 @@ fork, and uv.
 
 ## Requirements
 
-- Python 3.13
+- Python 3.14 (3.15 once DearPyGui ships a cp315 wheel)
 - [uv](https://docs.astral.sh/uv/) for environment and dependency management
 
 ## Setup

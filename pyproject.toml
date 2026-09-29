@@ -3,7 +3,7 @@ name = "better-scope"
 version = "2.1.0"
 description = "DearPyGui tool for capturing screenshots, naming channels, and plotting waveforms from Tektronix oscilloscopes via the AlphaOmegaSemiconductor pymeasure fork."
 readme = "README.md"
-requires-python = ">=3.13,<3.14"
+requires-python = ">=3.14,<3.15"
 authors = [{ name = "Niel Walker", email = "nielandrewalker@gmail.com" }]
 dependencies = [
     "dearpygui>=2.3.1",
