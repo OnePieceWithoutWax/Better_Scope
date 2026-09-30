@@ -51,4 +51,8 @@ Tests run without hardware (VISA discovery and the pymeasure driver are mocked).
   tab configures buses; results show as plot lanes and in the Event Table.
 - `better_scope/waveform_io.py` — save/load waveforms (`.npz`, Tektronix CSV,
   generic CSV) for offline decode.
+- `better_scope/live.py` — live decode trigger logic (new acquisition /
+  stopped state, not a timer).
+- `better_scope/digital.py` — FlexChannel logic-probe (TLP058) sources
+  (`CH1_D0`...) and `CH<x>_DALL` bit splitting.
 - `main.py` — entry point.

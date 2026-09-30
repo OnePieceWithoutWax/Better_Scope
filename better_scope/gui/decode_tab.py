@@ -16,6 +16,8 @@ from typing import TYPE_CHECKING, Any
 
 import dearpygui.dearpygui as dpg
 
+from better_scope.digital import is_digital_source
+
 if TYPE_CHECKING:
     from better_scope.decode.api import Decoder, Option
     from better_scope.decode.model import BusConfig
@@ -497,6 +499,11 @@ class DecodeTab:
                             dpg.add_text(role.help)
                     dpg.add_combo(sources, default_value=source or _NONE, width=130,
                                   callback=lambda s, v, r=role.id: self._set_source(bus, r, v))
+                    if source and is_digital_source(source):
+                        dpg.add_text("digital", color=_MUTED)
+                        with dpg.tooltip(dpg.last_item()):
+                            dpg.add_text("Logic probe bit: no thresholding here. The threshold is set on the scope.")
+                        continue
                     dpg.add_combo(_THRESHOLD_MODES, default_value=th.mode if th else "auto", width=90,
                                   enabled=bool(source),
                                   callback=lambda s, v, src=source: self._set_threshold(bus, src, mode=v))

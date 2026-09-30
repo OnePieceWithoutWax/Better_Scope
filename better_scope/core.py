@@ -19,6 +19,13 @@ from pathlib import Path
 from typing import Any
 
 from better_scope.config import AppConfig
+from better_scope.digital import (
+    curve_to_ints,
+    digital_sources,
+    is_digital_probe,
+    parse_digital_source,
+    split_bits,
+)
 from better_scope.instruments.discovery import find_instruments
 from better_scope.instruments.drivers import driver_for
 from better_scope.logger import ListHandler, setup_logger
@@ -65,6 +72,8 @@ class BetterScope:
         self.instrument_list: list[dict[str, Any]] = []
         self.device_id: str | None = None
         self.meta: dict[str, Any] = {}
+        # FlexChannels fitted with a logic probe (detected on connect).
+        self.digital_channels: list[int] = []
 
         self.config = AppConfig()
         self.recent: dict[str, Any] = {
@@ -157,6 +166,7 @@ class BetterScope:
                 self.device_id = f"{model} (SN: {serial})"
             self.config.last_connected_scope = dict(instr_info)
         logger.info(f"Connected: {self.device_id}")
+        self.digital_channels = self.detect_digital_channels()
         return True
 
     def disconnect(self) -> bool:
@@ -172,6 +182,7 @@ class BetterScope:
         finally:
             self._instrument = None
             self.scope_addr = None
+            self.digital_channels = []
         logger.info("Disconnected from scope")
         return True
 
@@ -286,6 +297,27 @@ class BetterScope:
                 }
             )
         return result
+
+    def detect_digital_channels(self) -> list[int]:
+        """FlexChannels whose ``CH<x>:PROBETYPE?`` reports a logic probe.
+
+        Returns:
+            1-based channel indices (empty when none, or not connected).
+        """
+        found: list[int] = []
+        for i, channel in enumerate(getattr(self._instrument, "channels", ()), start=1):
+            if is_digital_probe(self._read(channel, "probe_type", f"CH{i}")):
+                found.append(i)
+        if found:
+            logger.info(f"Digital probes on: {', '.join(f'CH{i}' for i in found)}")
+        return found
+
+    def sources(self) -> list[str]:
+        """Acquirable sources: analog ``CHn`` plus ``CHn_D0..7`` of logic probes."""
+        out: list[str] = []
+        for i in range(1, self.analog_channel_count + 1):
+            out.extend(digital_sources(i) if i in self.digital_channels else [f"CH{i}"])
+        return out
 
     def set_channel_properties(
         self, index: int, props: dict[str, Any]
@@ -437,28 +469,89 @@ class BetterScope:
     # -- Waveforms -------------------------------------------------------------
 
     def acquire_waveforms(self, sources: list[str]) -> dict[str, tuple]:
-        """Acquire scaled ``(time, voltage)`` arrays for ``sources``.
+        """Acquire ``(time, values)`` arrays for ``sources``.
+
+        Analog sources return scaled voltages; digital bit sources
+        (``CH1_D0``...) return boolean arrays, one ``CHx_DALL`` transfer per
+        FlexChannel however many of its bits are asked for.
 
         Args:
-            sources: Source names such as ``["CH1", "CH2"]``.
+            sources: Source names such as ``["CH1", "CH2", "CH3_D0"]``.
 
         Returns:
-            Mapping of source name to a ``(time_array, voltage_array)`` tuple.
+            Mapping of source name to a ``(time_array, value_array)`` tuple,
+            in the order asked for.
         """
         if not self.is_connected():
             raise ValueError("No oscilloscope connected")
         if not sources:
             return {}
-        waveforms = getattr(self._instrument, "waveforms", None)
-        if waveforms is None:
-            raise AttributeError("Instrument has no waveform-transfer interface")
-        if hasattr(waveforms, "get_multiple_waveforms"):
-            return waveforms.get_multiple_waveforms(sources)
-        return {src: waveforms.get_scaled_waveform(src) for src in sources}
+        analog = [s for s in sources if parse_digital_source(s) is None]
+        by_channel: dict[int, list[str]] = {}
+        for source in sources:
+            parsed = parse_digital_source(source)
+            if parsed is not None:
+                by_channel.setdefault(parsed[0], []).append(source)
+
+        out: dict[str, tuple] = {}
+        if analog:
+            waveforms = getattr(self._instrument, "waveforms", None)
+            if waveforms is None:
+                raise AttributeError("Instrument has no waveform-transfer interface")
+            if hasattr(waveforms, "get_multiple_waveforms"):
+                out.update(waveforms.get_multiple_waveforms(analog))
+            else:
+                out.update({src: waveforms.get_scaled_waveform(src) for src in analog})
+        for channel, names in by_channel.items():
+            t, bits = self.acquire_digital(channel)
+            for name in names:
+                out[name] = (t, bits[parse_digital_source(name)[1]])
+        return {s: out[s] for s in sources}
+
+    def acquire_digital(self, channel: int) -> tuple[Any, list[Any]]:
+        """Transfer all eight bits of a FlexChannel's logic probe.
+
+        Sends ``DATa:SOUrce CH<x>_DALL`` and reads one ``CURVe?`` as raw
+        unsigned binary, restoring ``DATa:ENCdg`` afterwards (the pymeasure
+        fork's analog path relies on it). The time base comes from the
+        preamble, as for analog (``XZEro + n * XINcr``).
+
+        Args:
+            channel: 1-based FlexChannel index.
+
+        Returns:
+            ``(time_array, [d0, ..., d7])`` with boolean bit arrays.
+        """
+        import numpy as np
+
+        inst = self._instrument
+        previous = inst.ask("DATa:ENCdg?").strip()
+        inst.write(f"DATa:SOUrce CH{channel}_DALL")
+        inst.write("DATa:ENCdg SRPbinary")
+        try:
+            width = int(float(inst.ask("WFMOutpre:BYT_Nr?")))
+            order = inst.ask("WFMOutpre:BYT_Or?")
+            x_incr = float(inst.ask("WFMOutpre:XINcr?"))
+            x_zero = float(inst.ask("WFMOutpre:XZEro?"))
+            inst.write("CURVe?")
+            payload = inst.adapter.connection.read_binary_values(datatype="s", container=bytes)
+        finally:
+            inst.write(f"DATa:ENCdg {previous}")
+        values = curve_to_ints(payload, width, order)
+        t = x_zero + np.arange(values.size) * x_incr
+        return t, split_bits(values)
 
     def enabled_sources(self) -> list[str]:
-        """Analog channels currently displayed on the scope (``["CH1", ...]``)."""
-        return [f"CH{ch['index']}" for ch in self.get_channels() if ch["enabled"]]
+        """Channels currently displayed on the scope (``["CH1", "CH2_D0", ...]``).
+
+        A displayed FlexChannel with a logic probe contributes all 8 bits.
+        """
+        out: list[str] = []
+        for ch in self.get_channels():
+            if ch["enabled"]:
+                i = ch["index"]
+                out.extend(digital_sources(i) if i in self.digital_channels else [f"CH{i}"])
+        return out
 
     def save_waveforms(
         self,

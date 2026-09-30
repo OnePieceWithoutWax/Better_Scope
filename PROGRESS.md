@@ -252,22 +252,40 @@ programmer manual as remembered and must be confirmed on hardware:
 `DATa:SOUrce CH<x>_DALL`, `CURVe?` definite-length block, bit n = D<n>.
 
 Design decisions (not dictated by the prompt):
-- `better_scope/digital.py`: source names (`CH1_D0`), IEEE 488.2 block
-  parsing, raw curve -> unsigned ints -> 8 boolean arrays.
+- `better_scope/digital.py`: source names (`CH1_D0`), probe-type check,
+  raw curve bytes -> unsigned ints -> 8 boolean arrays.
 - `BetterScope.digital_channels` detected on connect; `acquire_waveforms`
   splits `CHx_Dn` requests into one DALL transfer per channel (raw
-  write/read_bytes, encoding saved and restored) and returns `(t, bool)`.
+  write + read_binary_values, `DATa:ENCdg` set to SRPbinary and restored)
+  and returns `(t, bool)`.
 - Digital sources are `(t, bool_array)` tuples: the engine's `digitize`
   already takes bool arrays as-is, so no engine change.
 - Plot: bool sources go in their own subplot as stacked 0/1 traces.
-- Decode tab: threshold widgets replaced by "digital (scope threshold)".
+- Decode tab: threshold widgets replaced by "digital" (tooltip: the
+  threshold is set on the scope).
 - `.npz`: bool sources stored with `np.packbits` (`s{i}_packed` + count);
   CSV columns named `CHx_Dn` holding only 0/1 load as bool.
 - Threshold read/write (optional in the prompt) not exposed.
+- Transfer reads the block with pyvisa's `read_binary_values(datatype="s",
+  container=bytes)` on `inst.adapter.connection` (handles the IEEE 488.2
+  header and binary LF bytes), then `curve_to_ints` + `split_bits`.
+- A digital channel's 8 bits count as displayed when `SELect:CH<x>` (fork
+  `channel.enable`) is on; used for the save-with-capture source list.
+- Plot fix found while testing: a second plot rebuild in the same frame (or
+  a rebuild on a hidden tab) read the new, unrendered axis and reset the X
+  range to 0..1. The range set by a rebuild is now held until the plot is
+  visible (`_hold_x` / `_held_x`).
 
 Plan:
-- [ ] `digital.py` + core detection/transfer
-- [ ] waveform_io packbits
-- [ ] plot tab digital subplot; decode tab threshold hiding
-- [ ] tests: fake DALL payload split, UART/SPI decode from bool sources, npz round trip
-- [ ] mark 07 Done (hardware verify pending), follow-up entries, commit
+- [x] `digital.py` + core detection/transfer
+- [x] waveform_io packbits
+- [x] plot tab digital subplot; decode tab threshold hiding
+- [x] tests: fake DALL payload split, UART/SPI decode from bool sources, npz round trip
+- [x] mark 07 Done (hardware verify pending), follow-up entries, commit
+
+Notes for later prompts:
+- Candidate to upstream to the AOS pymeasure fork: a digital transfer path
+  (`CH<x>_DALL` -> unsigned ints -> bits). The fork's `get_curve_data`
+  assumes analog scaling and signed ints, and reads the block header as text.
+- `acquire_waveforms` now returns `(t, bool)` for `CHx_Dn` sources; anything
+  that assumed float values (e.g. `plot_tab.as_float_arrays`) must keep bools.

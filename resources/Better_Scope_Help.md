@@ -41,7 +41,10 @@ scope decode license needed).
 1. **Decode tab** — *Add* a bus, pick a decoder (UART, I2C, SMBus, PMBus,
    SPI, or a plugin), map each signal role to a source (`CH1`... or a loaded
    `FILE:` source), and set the threshold per source (*auto* uses the signal's
-   midpoint; *manual* uses *Level*; hysteresis 0 = automatic). The options
+   midpoint; *manual* uses *Level*; hysteresis 0 = automatic). A FlexChannel
+   fitted with a TLP058 logic probe (detected on connect) offers its bits as
+   `CH1_D0`...`CH1_D7`; they need no threshold here (it is set on the scope),
+   are plotted as stacked logic traces, and are saved bit-packed. The options
    form comes from the decoder. Buses can be renamed, duplicated, disabled or
    removed; everything is remembered between sessions.
 2. **Register maps** — For SMBus/PMBus and SPI buses, *Add Excel map...* binds

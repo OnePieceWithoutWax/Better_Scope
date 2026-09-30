@@ -7,15 +7,20 @@ file plots and decodes exactly like a live acquisition. GUI-agnostic.
 Formats (chosen by extension; CSV flavours are sniffed):
 
 - **Native** ``.npz``: per source the time base ``[t0, dt]`` (float64) and
-  the samples (float32), plus a ``meta`` JSON string (format tag, app
-  version, scope id, capture time, units, source order and, optionally, the
-  bus configs and register-map bindings needed to repeat the decode).
+  the samples (float32; boolean digital sources are bit-packed with
+  ``np.packbits`` plus a sample count), plus a ``meta`` JSON string (format
+  tag, app version, scope id, capture time, units, source order and,
+  optionally, the bus configs and register-map bindings needed to repeat
+  the decode).
 - **Tektronix CSV**: a block of ``key,value[,value...]`` header rows, then a
   ``TIME,CH1,...`` column row (matched case-insensitively), then numbers.
   The header rows go into ``meta["header"]`` as-is; nothing else about their
   layout is assumed.
 - **Generic CSV**: a time column then one column per source, with an
   optional column-name row.
+
+In CSV files a digital bit source (``CH1_D0``) is written as 0/1 and read
+back as booleans when its column holds only 0 and 1.
 
 Tektronix ``.wfm`` is not supported yet (needs a sample file to verify
 against Tek's reference waveform file-format document).
@@ -31,6 +36,7 @@ from typing import Any
 
 import numpy as np
 
+from better_scope.digital import is_digital_source
 from better_scope.version import __version__
 
 NATIVE_FORMAT = "better_scope.waveforms"
@@ -128,13 +134,18 @@ def _save_npz(path: Path, waveforms: Mapping[str, tuple[Any, Any]], meta: dict[s
         saved_at=datetime.now().isoformat(timespec="seconds"),
         sources=sources,
     )
-    meta.setdefault("units", {s: "V" for s in sources})
+    values = {s: np.asarray(waveforms[s][1]) for s in sources}
+    meta.setdefault("units", {s: "logic" if values[s].dtype == bool else "V" for s in sources})
     arrays: dict[str, np.ndarray] = {"meta": np.array(json.dumps(meta, default=str))}
     for i, source in enumerate(sources):
-        t, v = waveforms[source]
-        t0, dt = time_base(t)
+        t0, dt = time_base(waveforms[source][0])
         arrays[f"s{i}_timebase"] = np.array([t0, dt], dtype=np.float64)
-        arrays[f"s{i}_samples"] = np.asarray(v, dtype=np.float32)
+        v = values[source]
+        if v.dtype == bool:
+            arrays[f"s{i}_packed"] = np.packbits(v)
+            arrays[f"s{i}_count"] = np.array(v.size, dtype=np.int64)
+        else:
+            arrays[f"s{i}_samples"] = v.astype(np.float32)
     # np.savez appends ".npz" when missing; the caller's suffix is already .npz.
     np.savez(path, **arrays)
 
@@ -149,7 +160,10 @@ def _load_npz(path: Path) -> tuple[Waveforms, dict[str, Any]]:
         waveforms: Waveforms = {}
         for i, source in enumerate(meta["sources"]):
             t0, dt = (float(x) for x in data[f"s{i}_timebase"])
-            v = data[f"s{i}_samples"].astype(np.float64)
+            if f"s{i}_packed" in data.files:
+                v = np.unpackbits(data[f"s{i}_packed"], count=int(data[f"s{i}_count"])).astype(bool)
+            else:
+                v = data[f"s{i}_samples"].astype(np.float64)
             waveforms[source] = (t0 + np.arange(v.size) * dt, v)
     return waveforms, meta
 
@@ -234,7 +248,12 @@ def _load_csv(path: Path) -> tuple[Waveforms, dict[str, Any]]:
         encoding="utf-8-sig",
     )
     t = data[:, 0].copy()
-    waveforms: Waveforms = {name: (t, data[:, i + 1].copy()) for i, name in enumerate(names)}
+    waveforms: Waveforms = {}
+    for i, name in enumerate(names):
+        column = data[:, i + 1].copy()
+        if is_digital_source(name) and np.isin(column, (0.0, 1.0)).all():
+            column = column.astype(bool)
+        waveforms[name] = (t, column)
 
     header = {row[0]: _header_value(row[1:]) for row in header_rows if row and row[0]}
     meta: dict[str, Any] = {

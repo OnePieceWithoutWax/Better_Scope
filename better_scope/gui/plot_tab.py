@@ -5,7 +5,8 @@ decimated copy of the visible range, recomputed in :meth:`PlotTab.tick` when
 the X range or plot width changes. Decoded buses get one lane each below the
 waveforms (``dpg.subplots`` with linked X axes); a lane has one row per
 (level, decoder) pair, drawn as one shade series per colour plus text
-labels for the boxes wide enough to hold one.
+labels for the boxes wide enough to hold one. Digital bit sources (boolean
+arrays) get their own subplot, one stacked 0/1 trace per bit.
 """
 
 from __future__ import annotations
@@ -16,6 +17,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import dearpygui.dearpygui as dpg
+
+from better_scope.digital import is_digital_source
 
 if TYPE_CHECKING:
     from better_scope.decode.model import DecodeResult
@@ -36,6 +39,9 @@ _LEVEL_FILL = {
 _ERROR_FILL = (255, 70, 70, 130)
 _MAX_LABELS_PER_LANE = 400
 _REDRAW_INTERVAL_S = 0.08
+# Digital traces: vertical pitch per bit and the drawn height of a 1.
+_DIGITAL_PITCH = 1.5
+_DIGITAL_HIGH = 1.0
 
 
 @dataclass
@@ -57,10 +63,17 @@ class _Lane:
 
 
 def as_float_arrays(waveforms: dict[str, tuple[Any, Any]]) -> dict[str, tuple[Any, Any]]:
-    """Convert acquired ``(t, v)`` pairs to float numpy arrays (worker thread)."""
+    """Convert acquired ``(t, v)`` pairs to numpy arrays (worker thread).
+
+    Times and analog values become float; digital (boolean) values stay boolean.
+    """
     import numpy as np
 
-    return {src: (np.asarray(t, dtype=float), np.asarray(v, dtype=float)) for src, (t, v) in waveforms.items()}
+    out: dict[str, tuple[Any, Any]] = {}
+    for src, (t, v) in waveforms.items():
+        v = np.asarray(v)
+        out[src] = (np.asarray(t, dtype=float), v if v.dtype == bool else v.astype(float))
+    return out
 
 
 class PlotTab:
@@ -90,6 +103,8 @@ class PlotTab:
         self._wave_x: int | str | None = None
         self._wave_y: int | str | None = None
         self._series: dict[str, int | str] = {}
+        # Digital source -> (line series, baseline y) in the digital subplot.
+        self._digital_series: dict[str, tuple[int | str, float]] = {}
         self._lane_axes: list[tuple[_Lane, int | str]] = []
 
         # Decode display state.
@@ -106,6 +121,8 @@ class PlotTab:
         self._fit_pending = False
         self._fit_y_pending = False
         self._release_x_in = 0
+        # X range set on the axis but not yet rendered (rebuilt plot, hidden tab).
+        self._held_x: tuple[float, float] | None = None
 
     # -- build -----------------------------------------------------------------
 
@@ -171,7 +188,7 @@ class PlotTab:
     # -- sources ---------------------------------------------------------------
 
     def _channel_sources(self) -> list[str]:
-        return [f"CH{i}" for i in range(1, self.app.scope.analog_channel_count + 1)]
+        return self.app.scope.sources()
 
     def _file_sources(self) -> list[str]:
         return [s for s in self.waveforms if s.startswith(FILE_PREFIX)]
@@ -443,34 +460,63 @@ class PlotTab:
         if width * 1.2 > span or width < span / 50:
             span = width * 6
         centre = (start + end) / 2
-        dpg.set_axis_limits(self._wave_x, centre - span / 2, centre + span / 2)
-        self._release_x_in = 2
+        self._hold_x(centre - span / 2, centre + span / 2)
         self.app.show_plot_tab()
+
+    def _hold_x(self, x_min: float, x_max: float) -> None:
+        """Set the X range and keep it until the plot has rendered it."""
+        dpg.set_axis_limits(self._wave_x, x_min, x_max)
+        self._held_x = (x_min, x_max)
+        self._release_x_in = 2
 
     # -- plot construction ---------------------------------------------------------
 
     def _rebuild_plot(self) -> None:
-        """Recreate the plot (waveforms + one lane per shown bus), keeping the X range."""
+        """Recreate the plots (analog, digital, one lane per shown bus), keeping the X range."""
         keep: tuple[float, float] | None = None
-        had_content = bool(self._series or self._lane_axes)
+        had_content = bool(self._series or self._digital_series or self._lane_axes)
         if had_content and self._wave_x is not None and not self._fit_pending:
-            keep = tuple(dpg.get_axis_limits(self._wave_x))
+            # A range set earlier this frame (or on a hidden tab) has not reached the axis yet.
+            keep = self._held_x or tuple(dpg.get_axis_limits(self._wave_x))
         dpg.delete_item(self.area_tag, children_only=True)
         self._series = {}
+        self._digital_series = {}
         self._lane_axes = []
 
+        displayed = self._displayed()
+        digital = [s for s in displayed if is_digital_source(s)]
+        analog = [s for s in displayed if s not in digital]
+        show_analog = bool(analog) or not digital
+        ratios = ([4.0] if show_analog else []) + ([0.6 + 0.35 * len(digital)] if digital else [])
+        ratios += [0.5 + 0.45 * len(lane.rows) for lane in self._lanes]
         container: int | str = self.area_tag
-        if self._lanes:
-            ratios = [4.0] + [0.5 + 0.45 * len(lane.rows) for lane in self._lanes]
-            container = dpg.add_subplots(1 + len(self._lanes), 1, parent=self.area_tag, link_all_x=True,
+        if len(ratios) > 1:
+            container = dpg.add_subplots(len(ratios), 1, parent=self.area_tag, link_all_x=True,
                                          row_ratios=ratios, width=-1, height=-1, no_title=True)
 
-        self._wave_plot = dpg.add_plot(parent=container, width=-1, height=-1, no_title=True)
-        dpg.add_plot_legend(parent=self._wave_plot)
-        self._wave_x = dpg.add_plot_axis(dpg.mvXAxis, label="Time (s)", parent=self._wave_plot)
-        self._wave_y = dpg.add_plot_axis(dpg.mvYAxis, label="Voltage (V)", parent=self._wave_plot)
-        for source in self._displayed():
-            self._series[source] = dpg.add_line_series([], [], label=source, parent=self._wave_y)
+        self._wave_plot = self._wave_x = self._wave_y = None
+        if show_analog:
+            self._wave_plot = dpg.add_plot(parent=container, width=-1, height=-1, no_title=True)
+            dpg.add_plot_legend(parent=self._wave_plot)
+            self._wave_x = dpg.add_plot_axis(dpg.mvXAxis, label="Time (s)", parent=self._wave_plot)
+            self._wave_y = dpg.add_plot_axis(dpg.mvYAxis, label="Voltage (V)", parent=self._wave_plot)
+            for source in analog:
+                self._series[source] = dpg.add_line_series([], [], label=source, parent=self._wave_y)
+
+        if digital:
+            plot = dpg.add_plot(parent=container, width=-1, height=-1, no_title=True, no_menus=True)
+            x_axis = dpg.add_plot_axis(dpg.mvXAxis, label="" if show_analog else "Time (s)", parent=plot,
+                                       no_tick_labels=bool(self._lanes))
+            y_axis = dpg.add_plot_axis(dpg.mvYAxis, label="Digital", parent=plot, no_gridlines=True)
+            ticks = []
+            for i, source in enumerate(digital):
+                base = (len(digital) - 1 - i) * _DIGITAL_PITCH
+                self._digital_series[source] = (dpg.add_line_series([], [], parent=y_axis), base)
+                ticks.append((source, base + _DIGITAL_HIGH / 2))
+            dpg.set_axis_ticks(y_axis, tuple(ticks))
+            dpg.set_axis_limits(y_axis, -0.3, (len(digital) - 1) * _DIGITAL_PITCH + _DIGITAL_HIGH + 0.3)
+            if self._wave_plot is None:
+                self._wave_plot, self._wave_x = plot, x_axis
 
         for lane in self._lanes:
             plot = dpg.add_plot(parent=container, width=-1, height=-1, no_title=True, no_menus=True,
@@ -483,8 +529,7 @@ class PlotTab:
             self._lane_axes.append((lane, y_axis))
 
         if keep is not None:
-            dpg.set_axis_limits(self._wave_x, *keep)
-            self._release_x_in = 2
+            self._hold_x(*keep)
         elif self.waveforms or self._lanes:
             self._fit_pending = True
         self._fit_y_pending = True
@@ -510,14 +555,17 @@ class PlotTab:
         if self._release_x_in:
             self._release_x_in -= 1
             if self._release_x_in == 0 and self._wave_x is not None:
-                dpg.set_axis_limits_auto(self._wave_x)
+                if self._held_x is not None and not dpg.is_item_visible(self._wave_plot):
+                    self._release_x_in = 1  # not rendered yet (hidden tab): keep holding
+                else:
+                    self._held_x = None
+                    dpg.set_axis_limits_auto(self._wave_x)
 
         if self._fit_pending and self._wave_x is not None:
             self._fit_pending = False
             rng = self._data_range()
             if rng is not None:
-                dpg.set_axis_limits(self._wave_x, *rng)
-                self._release_x_in = 2
+                self._hold_x(*rng)
                 self._redraw(rng[0], rng[1])
         elif self._wave_x is not None:
             now = time.monotonic()
@@ -549,6 +597,11 @@ class PlotTab:
             sl = visible_slice(t, x_min, x_max)
             x, y = minmax_decimate(t[sl], v[sl], width)
             dpg.set_value(series, [x, y])
+        for source, (series, base) in self._digital_series.items():
+            t, v = self.waveforms[source]
+            sl = visible_slice(t, x_min, x_max)
+            x, y = minmax_decimate(t[sl], v[sl], width)
+            dpg.set_value(series, [x, [base + _DIGITAL_HIGH * level for level in y]])
         if self._fit_y_pending and self._series:
             self._fit_y_pending = False
             dpg.fit_axis_data(self._wave_y)

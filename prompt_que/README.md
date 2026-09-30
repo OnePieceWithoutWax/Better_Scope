@@ -15,7 +15,7 @@ Every prompt assumes you have read this file first.
 | 04 | [04_decode_gui.md](04_decode_gui.md) | 01-03 | Done (2026-09-29) |
 | 05 | [05_waveform_save_and_readback.md](05_waveform_save_and_readback.md) | 01, 04 | Done (2026-09-29) for .npz and CSV; Tek CSV verified only on a synthetic fixture; .wfm waits for a sample file |
 | 06 | [06_live_decode.md](06_live_decode.md) | 04 | Done (2026-09-29) on a scripted fake scope; hardware verification pending |
-| 07 | [07_digital_channels.md](07_digital_channels.md) | 01, 04 | Ready (needs a TLP058 probe to verify) |
+| 07 | [07_digital_channels.md](07_digital_channels.md) | 01, 04 | Done (2026-09-29) on a fake DALL payload; query names and bit order need a TLP058 to verify |
 | 08 | [08_svid_decoder.md](08_svid_decoder.md) | 02, 10 | Gated: Intel SVID spec is under NDA |
 | 09 | [09_register_map_formats_and_encodings.md](09_register_map_formats_and_encodings.md) | 03 | Ready after 03 |
 | 10 | [10_private_protocol_plugins.md](10_private_protocol_plugins.md) | 01 | Ready (SVI3 stays a stub until spec details are supplied) |
