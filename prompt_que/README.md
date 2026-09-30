@@ -11,7 +11,7 @@ Every prompt assumes you have read this file first.
 | 00 | [00_python315_lazy_imports.md](00_python315_lazy_imports.md) | -- | Done on fallback (2026-09-29): on Python 3.14, `__lazy_modules__` only. Re-run the "Full migration" section once DearPyGui ships a cp315 wheel |
 | 01 | [01_decode_core_and_uart.md](01_decode_core_and_uart.md) | 00 (or its fallback) | Done (2026-09-29) |
 | 02 | [02_smbus_pmbus_spi_decoders.md](02_smbus_pmbus_spi_decoders.md) | 01 | Done (2026-09-29) |
-| 03 | [03_register_map_excel.md](03_register_map_excel.md) | 02 | Ready (template schema until an example map is supplied) |
+| 03 | [03_register_map_excel.md](03_register_map_excel.md) | 02 | Done (2026-09-29) on the default template schema; refit aliases when an example map is supplied |
 | 04 | [04_decode_gui.md](04_decode_gui.md) | 01-03 | Ready |
 | 05 | [05_waveform_save_and_readback.md](05_waveform_save_and_readback.md) | 01, 04 | Ready |
 | 06 | [06_live_decode.md](06_live_decode.md) | 04 | Ready (needs hardware to verify) |

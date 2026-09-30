@@ -98,3 +98,50 @@ Notes for later prompts:
   of count 1 looks like a Write Word, count 3 like a Write 32.
 - PEC auto without hints cannot catch a bad PEC (it just looks like data).
 - 4.8M-sample PMBus record (2000 commands) decodes in ~0.55 s.
+
+## Prompt 03 -- Register maps (Excel) and register-access mapper (2026-09-29)
+
+No example map in `resources/examples/`: using the default template schema.
+
+Design decisions (not dictated by the prompt):
+- Importer plugins subclass `regmap.importers.RegmapImporter` (`id`, `name`,
+  `extensions`, `load(path) -> Device`), discovered by the generic `Registry`
+  from `better_scope.decode.regmap` + entry-point group
+  `better_scope.regmap_importers` + plugin folders. `load_register_map(path)`
+  picks the importer by file extension.
+- Validation collects every problem (`RegmapIssue`: sheet/row/column/message)
+  and raises one `RegmapError` listing them all.
+- Excel stores a typed `7:4` as a time (07:04); the Bits parser accepts it.
+- Bindings: `DeviceBinding(bus_id, device, address, spi_layout)`. `device=None`
+  = PMBus standard table only. A device with bus `pmbus` falls back to the
+  PMBus table for codes it does not define. `map_frames(..., auto_pmbus=True)`
+  adds a PMBus-table binding for PMBus-decoded buses with no binding.
+- SPI: a CS transaction is split into `frame_bits` chunks (so 8-bit words
+  work with a 16-bit layout); bit positions count from the frame LSB.
+- SMBus process calls produce two accesses (write then read).
+- `annotate(result, bindings)` adds level-3 `regmap` frames and, by default,
+  drops the PMBus level-3 frame with the same span (the register frame
+  carries the same name plus the fields).
+
+Plan:
+- [x] `uv add openpyxl`
+- [x] `regmap/model.py`: Device, Register, Field, FieldValue, decode_value, RegmapIssue/RegmapError
+- [x] `regmap/importers.py`: RegmapImporter base, registry, load_register_map
+- [x] `regmap/excel.py`: parsers, importer, write_template
+- [x] `resources/register_map_template.xlsx` + `scripts/make_regmap_template.py`
+- [x] `regmap/mapper.py`: SpiLayout, DeviceBinding, RegisterAccess, map_frames, access_frames, annotate
+- [x] tests: excel importer, field decode, mapper (SMBus, PMBus fallback, SPI default/custom)
+- [x] `docs/REGISTER_MAPS.md`, README link, mark 03 Done
+- [x] `uv run pytest` green, commit
+
+Notes for later prompts:
+- New dependency: openpyxl 3.1.5 (+ et-xmlfile).
+- GUI (04): `annotate(result, bindings)` returns the command history and adds
+  `regmap` level-3 frames; `RegisterAccess.labels` are the text variants.
+  `write_template()` can back a "save template" button.
+- 09: add importers as `RegmapImporter` subclasses; parsers `parse_int`,
+  `parse_bits`, `parse_enum` in `regmap/excel.py` are reusable. A user map
+  could also feed `smbus.command_sizes` hints (not done).
+- The SMBus mapper trusts the SMBus classification: without size hints a
+  2-byte payload on a byte register is a Write Word and is flagged as a
+  size mismatch.

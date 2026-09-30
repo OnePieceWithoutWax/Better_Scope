@@ -46,4 +46,6 @@ Tests run without hardware (VISA discovery and the pymeasure driver are mocked).
 - `better_scope/gui/` — DearPyGui app shell, worker thread, and tabs.
 - `better_scope/decode/` — GUI-agnostic software serial decoder with a plugin
   API (UART, I2C, SMBus, PMBus, SPI). See [docs/DECODERS.md](docs/DECODERS.md) to write a decoder.
+  Register maps (Excel) label SMBus/PMBus/SPI traffic as register reads and
+  writes; see [docs/REGISTER_MAPS.md](docs/REGISTER_MAPS.md).
 - `main.py` — entry point.
