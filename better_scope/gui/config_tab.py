@@ -59,6 +59,11 @@ class ConfigTab:
                 default_value=cfg.auto_copy_to_clipboard,
                 callback=lambda s, v: setattr(cfg, "auto_copy_to_clipboard", v),
             )
+            dpg.add_checkbox(
+                label="Save waveforms (.npz) with each capture",
+                default_value=cfg.save_waveform,
+                callback=lambda s, v: setattr(cfg, "save_waveform", v),
+            )
             dpg.add_separator()
             dpg.add_combo(
                 label="Display captured image",

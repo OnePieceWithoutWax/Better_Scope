@@ -47,5 +47,8 @@ Tests run without hardware (VISA discovery and the pymeasure driver are mocked).
 - `better_scope/decode/` — GUI-agnostic software serial decoder with a plugin
   API (UART, I2C, SMBus, PMBus, SPI). See [docs/DECODERS.md](docs/DECODERS.md) to write a decoder.
   Register maps (Excel) label SMBus/PMBus/SPI traffic as register reads and
-  writes; see [docs/REGISTER_MAPS.md](docs/REGISTER_MAPS.md).
+  writes; see [docs/REGISTER_MAPS.md](docs/REGISTER_MAPS.md). The **Decode**
+  tab configures buses; results show as plot lanes and in the Event Table.
+- `better_scope/waveform_io.py` — save/load waveforms (`.npz`, Tektronix CSV,
+  generic CSV) for offline decode.
 - `main.py` — entry point.

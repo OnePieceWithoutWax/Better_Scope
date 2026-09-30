@@ -182,3 +182,52 @@ def test_apply_trigger_and_actions() -> None:
     scope.set_trigger_level_50()
     assert "TRIGger:FORCe" in instr.written
     assert "TRIGger:A SETLevel" in instr.written
+
+
+class FakeWaveforms:
+    def get_multiple_waveforms(self, sources: list[str]) -> dict:
+        import numpy as np
+
+        t = np.arange(100) * 1e-6
+        return {s: (t, np.sin(t * 1e5) + i) for i, s in enumerate(sources)}
+
+
+def test_capture_saves_waveforms_when_enabled(tmp_path: Path) -> None:
+    from better_scope.waveform_io import load_waveforms
+
+    channels = (FakeChannel(), FakeChannel(), FakeChannel())
+    channels[1].enable = False
+    instr = FakeInstrument(channels)
+    instr.capture_screenshot = lambda: b"png"  # type: ignore[attr-defined]
+    instr.waveforms = FakeWaveforms()  # type: ignore[attr-defined]
+    scope = _connected_scope(instr)
+    scope.config = AppConfig(_config_file=tmp_path / "config.json")
+    scope.config.decode_buses = [{"bus_id": "b", "name": "B", "decoder_id": "uart", "role_map": {"rx": "CH1"}}]
+    scope.config.save_waveform = True
+
+    scope.capture(save_dir=tmp_path, filename="shot", suffix=".png")
+
+    assert (tmp_path / "shot.png").read_bytes() == b"png"
+    waves, meta = load_waveforms(tmp_path / "shot.npz")
+    assert list(waves) == ["CH1", "CH3"]
+    assert meta["bus_configs"][0]["bus_id"] == "b"
+    assert meta["map_bindings"] == []
+
+
+def test_worker_reports_errors_on_main_thread() -> None:
+    import time
+
+    from better_scope.gui.worker import Worker
+
+    worker = Worker()
+    seen: list[Exception] = []
+
+    def fail() -> None:
+        raise ValueError("boom")
+
+    worker.submit(fail, on_error=seen.append)
+    deadline = time.monotonic() + 5
+    while not seen and time.monotonic() < deadline:
+        worker.drain()
+        time.sleep(0.01)
+    assert [str(e) for e in seen] == ["boom"]

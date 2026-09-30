@@ -19,11 +19,54 @@ pymeasure fork.
    level; live trigger **state** and **frequency** are shown.
 4. **Plot** — Tick the channels to acquire, then press *Acquire* for a single
    shot, or enable *Auto-refresh* (with a Hz rate) for continuous updates.
+   Long records are drawn min/max decimated to the plot width; zoom in for
+   full detail. *Save waveforms...* writes `.npz` (native, keeps the decode
+   setup) or `.csv`; *Load waveforms...* reads `.npz`, Tektronix CSV or a
+   generic CSV (time column, then one column per source). Loaded sources
+   appear as `FILE:CH1`, ... and work with no scope connected.
 5. **Capture** — Save a screenshot. *Basic* takes a directory and filename;
    *Engineering* additionally builds subdirectories (e.g. IC Part Number / Test).
    Use the *+ / -* buttons to add or remove fields in a subdirectory row.
 6. **Config** — Filename options (auto-increment or datestamp, mutually
-   exclusive), clipboard auto-copy, and captured-image display options.
+   exclusive), clipboard auto-copy, captured-image display options, and
+   *Save waveforms (.npz) with each capture* (saves the channels shown on the
+   scope next to the screenshot).
+
+## Decode
+
+Serial buses are decoded in software from acquired or loaded waveforms (no
+scope decode license needed).
+
+1. **Decode tab** — *Add* a bus, pick a decoder (UART, I2C, SMBus, PMBus,
+   SPI, or a plugin), map each signal role to a source (`CH1`... or a loaded
+   `FILE:` source), and set the threshold per source (*auto* uses the signal's
+   midpoint; *manual* uses *Level*; hysteresis 0 = automatic). The options
+   form comes from the decoder. Buses can be renamed, duplicated, disabled or
+   removed; everything is remembered between sessions.
+2. **Register maps** — For SMBus/PMBus and SPI buses, *Add Excel map...* binds
+   a register map (optionally at a specific SMBus address; SPI buses also set
+   the frame layout). Map errors are shown under the binding. PMBus buses use
+   the standard command names when no map is bound. *Save map template...*
+   writes an example workbook.
+3. **Run** — Every Plot-tab acquisition decodes the enabled buses (their
+   channels are acquired automatically). *Decode* acquires and decodes in one
+   step, or re-decodes the loaded file when no scope is connected. Warnings
+   (e.g. undersampling, a missing channel) appear in the status line and the
+   *Warnings* list.
+4. **Plot lanes** — Each bus gets a lane under the waveforms, with rows for
+   bits, bytes/words, transactions and register accesses; toggle levels and
+   buses on the *Decode:* row. Errors are drawn in red.
+5. **Event Table** — The register command history (time, bus, device, R/W,
+   register, value, fields, error) with bus/device/register/errors-only
+   filters. Click a row to centre the plot on it.
+6. **Export** — *Export events CSV* writes the rows passing the table's
+   filters; *Export frames CSV* writes every frame of the shown levels and
+   buses.
+7. **Plugins** — The Decode tab's *Plugins* section lists the decoders found
+   and any plugin that failed to load.
+
+Writing a decoder: see `docs/DECODERS.md`. Register-map format: see
+`docs/REGISTER_MAPS.md`.
 
 ## Notes
 

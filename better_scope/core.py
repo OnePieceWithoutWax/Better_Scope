@@ -407,6 +407,53 @@ class BetterScope:
             return waveforms.get_multiple_waveforms(sources)
         return {src: waveforms.get_scaled_waveform(src) for src in sources}
 
+    def enabled_sources(self) -> list[str]:
+        """Analog channels currently displayed on the scope (``["CH1", ...]``)."""
+        return [f"CH{ch['index']}" for ch in self.get_channels() if ch["enabled"]]
+
+    def save_waveforms(
+        self,
+        path: str | Path,
+        waveforms: dict[str, tuple],
+        bus_configs: list[dict[str, Any]] | None = None,
+        map_bindings: list[dict[str, Any]] | None = None,
+    ) -> Path:
+        """Save waveforms with scope metadata and the decode setup.
+
+        Args:
+            path: Destination ``.npz`` (native) or ``.csv``.
+            waveforms: Source name -> ``(time_array, voltage_array)``.
+            bus_configs: Bus config dicts to embed (defaults to the config's).
+            map_bindings: Register-map binding dicts to embed (defaults to the
+                config's).
+
+        Returns:
+            The path written.
+        """
+        from better_scope.waveform_io import save_waveforms
+
+        meta = {
+            "scope": self.device_id if self.is_connected() else None,
+            "capture_time": datetime.now().isoformat(timespec="seconds"),
+            "bus_configs": self.config.decode_buses if bus_configs is None else bus_configs,
+            "map_bindings": self.config.decode_maps if map_bindings is None else map_bindings,
+        }
+        written = save_waveforms(Path(path), waveforms, meta)
+        logger.info(f"Saved waveforms ({', '.join(waveforms)}): {written}")
+        return written
+
+    def _save_capture_waveforms(self, save_dir: str | Path, filename: str, suffix: str) -> None:
+        """Save the enabled channels as ``<image stem>.npz`` next to a capture."""
+        try:
+            sources = self.enabled_sources()
+            if not sources:
+                logger.warning("save_waveform is on but no channel is enabled on the scope")
+                return
+            image = Path(save_dir) / filename_with_suffix(filename, suffix)
+            self.save_waveforms(image.with_suffix(".npz"), self.acquire_waveforms(sources))
+        except Exception as e:
+            logger.error(f"Failed to save waveforms with the capture: {e}", exc_info=True)
+
     # -- Capture & saving ------------------------------------------------------
 
     def capture(
@@ -453,6 +500,9 @@ class BetterScope:
             self.meta = metadata
             self._save_metadata(save_dir, filename, suffix)
             self.config.last_used_metadata = metadata
+
+        if self.config.save_waveform:
+            self._save_capture_waveforms(save_dir, filename, suffix)
 
         self.config.set_save_directory(save_dir)
         self.recent = {

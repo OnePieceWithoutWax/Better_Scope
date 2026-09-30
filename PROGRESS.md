@@ -145,3 +145,55 @@ Notes for later prompts:
 - The SMBus mapper trusts the SMBus classification: without size hints a
   2-byte payload on a byte register is a Write Word and is flagged as a
   size mismatch.
+
+## Prompts 04 + 05 -- Decode GUI, waveform save/load (2026-09-29)
+
+No Tek CSV or .wfm sample in `resources/examples/`: Tek CSV parser is
+layout-agnostic (key/value header block, then a `TIME,...` row found
+case-insensitively) and tested on a documented synthetic fixture; `.wfm` is
+not implemented. Ask the user for real sample files.
+
+Design decisions (not dictated by the prompts):
+- GUI-agnostic helpers: `better_scope/plotting.py` (min/max decimation,
+  visible-range frame filtering, label fitting), `decode/session.py`
+  (`MapBinding`, `DecodeSession`: persisted buses + map bindings -> run +
+  annotate; source remapping), `decode/events.py` (command-history rows,
+  filters) and `export.events_to_csv`.
+- `AppConfig.decode_buses` / `decode_maps` (lists of dicts, paths not maps).
+- `save_waveform` is kept and wired: a screenshot capture with it on also
+  saves the enabled analog channels as `<name>.npz` (with the bus configs
+  and map bindings) next to the image. Config tab gets its checkbox.
+- Loaded sources are named `FILE:<source>`; applying a file's embedded bus
+  configs remaps their sources to the `FILE:` names and replaces the bus list.
+- Plot: `dpg.subplots` (waveforms + one lane per shown bus, linked X). Lane
+  rows are (level, decoder) pairs; boxes are draw items in plot space, text
+  uses text points; redraw + re-decimation happen in `tick()` when the X
+  range or plot width changes.
+
+Plan:
+- [x] `plotting.py` + tests
+- [x] `decode/events.py`, `export.events_to_csv` + tests
+- [x] `decode/session.py` + config fields + tests
+- [x] `waveform_io.py` (npz, Tek CSV, generic CSV) + tests
+- [x] core: save waveforms with capture; Config tab checkbox
+- [x] `gui/decode_tab.py` (buses, roles, thresholds, options form, maps, plugins)
+- [x] `gui/event_table.py` (non-modal, filters, paging, click-to-centre)
+- [x] `gui/plot_tab.py` rewrite (subplots, lanes, decimation, save/load, decode hook)
+- [x] `gui/app.py` wiring; Help Decode section
+- [x] Run the app on synthetic data (scratch script, frame-buffer screenshots)
+- [x] `uv run pytest` green, mark 04/05 Done, commit
+
+Notes for later prompts:
+- DearPyGui 2.3.1: draw items (`draw_rectangle`) parented to a plot render at
+  the wrong place, ignore fill alpha and cover series. Lanes therefore use
+  one `add_shade_series` per (row, colour) plus `add_text_point` labels.
+- Worker bug fixed: `on_error` lambdas closed over the `except` variable,
+  which Python unbinds after the block, so every error callback raised
+  NameError. Errors now reach the UI.
+- `PlotTab.load_result(path, waveforms, meta)` is the entry point for any
+  loaded source (07 digital channels can reuse it); `DecodeTab.decode(waves)`
+  queues latest-wins while a decode runs (06 live decode can call it).
+- Decode runs after every Plot acquisition, including auto-refresh; a decode
+  requested while one is running replaces the pending one.
+- Events CSV exports the rows passing the Event Table filters.
+- No real Tektronix CSV / .wfm sample yet: ask the user for both.

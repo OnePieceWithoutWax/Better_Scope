@@ -38,6 +38,10 @@ class AppConfig:
     auto_copy_to_clipboard: bool = False
     last_connected_scope: dict = field(default_factory=dict)
     plot_refresh_hz: float = 3.0
+    # Decode setup: BusConfig dicts and MapBinding dicts (map paths, not contents).
+    # Assign a new list to persist; in-place mutation does not auto-save.
+    decode_buses: list = field(default_factory=list)
+    decode_maps: list = field(default_factory=list)
 
     # Non-persisted fields (excluded from JSON).
     _config_file: Path | None = field(default=None, repr=False, compare=False)

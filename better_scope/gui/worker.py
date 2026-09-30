@@ -42,7 +42,8 @@ class Worker:
             except Exception as exc:  # noqa: BLE001 - reported via on_error
                 logger.exception("Background task failed")
                 if on_error is not None:
-                    self.post(lambda: on_error(exc))
+                    # Bind now: ``exc`` is unbound once the except block ends.
+                    self.post(lambda e=exc: on_error(e))
                 return
             if on_done is not None:
                 self.post(lambda: on_done(result))

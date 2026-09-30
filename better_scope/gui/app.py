@@ -8,6 +8,8 @@ from better_scope.core import BetterScope
 from better_scope.gui.capture_tab import CaptureTab
 from better_scope.gui.channels_tab import ChannelsTab
 from better_scope.gui.config_tab import ConfigTab
+from better_scope.gui.decode_tab import DecodeTab
+from better_scope.gui.event_table import EventTable
 from better_scope.gui.help_about_tab import HelpAboutTab
 from better_scope.gui.plot_tab import PlotTab
 from better_scope.gui.scope_tab import ScopeTab
@@ -15,6 +17,8 @@ from better_scope.gui.trigger_tab import TriggerTab
 from better_scope.gui.worker import Worker
 
 PRIMARY_WINDOW = "primary_window"
+TAB_BAR = "main_tab_bar"
+PLOT_TAB = "main_tab_plot"
 
 
 class BetterScopeApp:
@@ -29,6 +33,8 @@ class BetterScopeApp:
         self.channels_tab = ChannelsTab(self)
         self.trigger_tab = TriggerTab(self)
         self.plot_tab = PlotTab(self)
+        self.decode_tab = DecodeTab(self)
+        self.event_table = EventTable(self)
         self.config_tab = ConfigTab(self)
         self.help_about_tab = HelpAboutTab(self)
 
@@ -45,13 +51,18 @@ class BetterScopeApp:
         self.channels_tab.on_connection_changed(connected)
         self.trigger_tab.on_connection_changed(connected)
         self.plot_tab.on_connection_changed(connected)
+        self.decode_tab.on_connection_changed(connected)
+
+    def show_plot_tab(self) -> None:
+        """Switch the main tab bar to the Plot tab."""
+        dpg.set_value(TAB_BAR, PLOT_TAB)
 
     # -- Lifecycle -------------------------------------------------------------
 
     def build(self) -> None:
         """Create all windows, tabs and the texture registry."""
         with dpg.window(tag=PRIMARY_WINDOW):
-            with dpg.tab_bar():
+            with dpg.tab_bar(tag=TAB_BAR):
                 with dpg.tab(label="Scope"):
                     self.scope_tab.build(dpg.last_item())
                 with dpg.tab(label="Capture"):
@@ -60,12 +71,15 @@ class BetterScopeApp:
                     self.channels_tab.build(dpg.last_item())
                 with dpg.tab(label="Trigger"):
                     self.trigger_tab.build(dpg.last_item())
-                with dpg.tab(label="Plot"):
+                with dpg.tab(label="Plot", tag=PLOT_TAB):
                     self.plot_tab.build(dpg.last_item())
+                with dpg.tab(label="Decode"):
+                    self.decode_tab.build(dpg.last_item())
                 with dpg.tab(label="Config"):
                     self.config_tab.build(dpg.last_item())
                 with dpg.tab(label="Help / About"):
                     self.help_about_tab.build(dpg.last_item())
+        self.event_table.build()
 
     def run(self) -> None:
         """Create the context, show the viewport and run the render loop."""
@@ -80,6 +94,8 @@ class BetterScopeApp:
 
         # Auto-scan shortly after launch so the UI is already visible.
         self.scope_tab.start_scan()
+        # Decoder backend (numpy, plugin discovery) loads off the main thread.
+        self.decode_tab.start()
 
         while dpg.is_dearpygui_running():
             self.worker.drain()
