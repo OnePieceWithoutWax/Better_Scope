@@ -1,6 +1,9 @@
 # Reference project (not committed; to be deleted after port)
 simple_scope_referance/
 
+# other folders that are mine
+prompt-que/
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]
