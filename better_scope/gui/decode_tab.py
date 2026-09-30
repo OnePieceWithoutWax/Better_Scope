@@ -9,6 +9,8 @@ decoder-specific.
 from __future__ import annotations
 
 import logging
+import time
+from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -22,6 +24,10 @@ if TYPE_CHECKING:
     from better_scope.gui.app import BetterScopeApp
 
 logger = logging.getLogger(__name__)
+
+# Called on the main thread with the decode time in seconds, or ``None`` when
+# nothing was decoded (backend not ready, no enabled bus, or an error).
+DecodeDone = Callable[[float | None], None]
 
 _ERROR = (255, 110, 110)
 _MUTED = (150, 150, 150)
@@ -63,6 +69,9 @@ class DecodeTab:
         self._map_errors: dict[int, str] = {}
         self._busy = False
         self._pending: dict[str, Any] | None = None
+        # Completion callbacks of the running decode and of the pending one.
+        self._running_done: list[DecodeDone] = []
+        self._pending_done: list[DecodeDone] = []
 
     # -- build ----------------------------------------------------------------
 
@@ -165,13 +174,20 @@ class DecodeTab:
         if self.ready:
             self._draw_editor()
 
-    def decode(self, waveforms: dict[str, Any]) -> None:
+    def decode(self, waveforms: dict[str, Any], on_done: DecodeDone | None = None) -> None:
         """Decode ``waveforms`` with the enabled buses on the worker thread.
 
         A request made while a decode is running is kept (latest wins) and
         runs when the current one finishes.
+
+        Args:
+            waveforms: Source name -> waveform.
+            on_done: Called when the decode that covers this request ends,
+                with its duration in seconds (``None`` if nothing decoded).
         """
         if not self.ready:
+            if on_done is not None:
+                on_done(None)
             return
         if not self.has_enabled_buses():
             if self.outcome is not None:
@@ -180,18 +196,46 @@ class DecodeTab:
                 self.outcome = None
                 self.app.event_table.set_rows([])
                 self.app.plot_tab.set_decode(DecodeResult(), self.session)
+            if on_done is not None:
+                on_done(None)
             return
         if self._busy:
             self._pending = waveforms
+            if on_done is not None:
+                self._pending_done.append(on_done)
             return
         self._busy = True
+        self._running_done = [on_done] if on_done is not None else []
         snapshot = self.session.snapshot()
+        registry = self.registry
+
+        def work() -> tuple[DecodeOutcome, float]:
+            start = time.perf_counter()
+            outcome = snapshot.decode(waveforms, registry)
+            return outcome, time.perf_counter() - start
+
         self._set_status("Decoding...")
         self.app.worker.submit(
-            lambda: snapshot.decode(waveforms, self.registry),
-            lambda outcome: self._on_decoded(outcome, snapshot),
+            work,
+            lambda done: self._on_decoded(done[0], snapshot, done[1]),
             self._on_decode_error,
         )
+
+    def _finish(self, seconds: float | None) -> None:
+        """Report the finished decode and start the pending one, if any."""
+        self._busy = False
+        callbacks, self._running_done = self._running_done, []
+        for callback in callbacks:
+            callback(seconds)
+        if self._pending is not None:
+            waveforms, self._pending = self._pending, None
+            pending_done, self._pending_done = self._pending_done, []
+            self.decode(waveforms)
+            if self._busy:
+                self._running_done.extend(pending_done)
+            else:
+                for callback in pending_done:
+                    callback(None)
 
     def apply_embedded(self, bus_dicts: list[dict], map_dicts: list[dict], mapping: dict[str, str]) -> None:
         """Replace the buses and map bindings with those stored in a waveform file.
@@ -214,10 +258,9 @@ class DecodeTab:
 
     # -- decode results -------------------------------------------------------
 
-    def _on_decoded(self, outcome: DecodeOutcome, snapshot: DecodeSession) -> None:
+    def _on_decoded(self, outcome: DecodeOutcome, snapshot: DecodeSession, seconds: float) -> None:
         from better_scope.decode.events import event_rows
 
-        self._busy = False
         self.outcome = outcome
         errors_changed = False
         if snapshot.maps == (self.session.maps if self.session else None) and outcome.map_errors != self._map_errors:
@@ -240,15 +283,12 @@ class DecodeTab:
         self._show_warnings(result.warnings)
         if errors_changed:
             self._draw_editor()
-
-        if self._pending is not None:
-            waveforms, self._pending = self._pending, None
-            self.decode(waveforms)
+        self._finish(seconds)
 
     def _on_decode_error(self, exc: Exception) -> None:
-        self._busy = False
         self._set_status(f"Decode failed: {exc}", error=True)
         self.app.plot_tab.set_status(f"Decode failed: {exc}")
+        self._finish(None)
 
     def _show_warnings(self, warnings: list[str]) -> None:
         dpg.configure_item(self.warn_header_tag, label=f"Warnings ({len(warnings)})")

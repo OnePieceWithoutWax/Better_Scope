@@ -385,6 +385,55 @@ class BetterScope:
         self._instrument.write("TRIGger:A SETLevel")
         logger.info("Set trigger level to 50%")
 
+    # -- Acquisition state -----------------------------------------------------
+
+    @property
+    def _acquisition(self) -> Any:
+        """The pymeasure acquisition sub-object."""
+        if self._instrument is None:
+            raise ValueError("No oscilloscope connected")
+        return self._instrument.acquisition
+
+    def acquisition_status(self) -> tuple[bool, int]:
+        """Read ``ACQuire:STATE?`` and ``ACQuire:NUMACq?``.
+
+        Returns:
+            ``(running, num_acquisitions)``. ``num_acquisitions`` counts
+            acquisitions since the last RUN/Single (the scope resets it).
+        """
+        acq = self._acquisition
+        state = str(acq.state).strip().upper()
+        running = state in ("RUN", "ON") or (state not in ("STOP", "OFF") and float(state) != 0)
+        return running, int(float(acq.num_acquisitions))
+
+    def run_acquisition(self) -> None:
+        """Start acquiring (``ACQuire:STATE RUN``)."""
+        self._acquisition.state = "RUN"
+
+    def stop_acquisition(self) -> None:
+        """Stop acquiring (``ACQuire:STATE STOP``)."""
+        self._acquisition.state = "STOP"
+
+    def get_stop_after(self) -> str:
+        """``ACQuire:STOPAfter?`` normalised to ``"RUNSTOP"`` or ``"SEQUENCE"``."""
+        return "SEQUENCE" if str(self._acquisition.stop_after).strip().upper().startswith("SEQ") else "RUNSTOP"
+
+    def set_stop_after(self, mode: str) -> None:
+        """Set ``ACQuire:STOPAfter`` to ``"RUNSTOP"`` or ``"SEQUENCE"``."""
+        self._acquisition.stop_after = mode
+
+    def arm_single(self) -> str:
+        """Start a single sequence (``STOPAfter SEQuence`` then ``STATE RUN``).
+
+        Returns:
+            The previous ``STOPAfter`` mode, for restoring later.
+        """
+        previous = self.get_stop_after()
+        self.set_stop_after("SEQUENCE")
+        self.run_acquisition()
+        logger.info("Armed single sequence")
+        return previous
+
     # -- Waveforms -------------------------------------------------------------
 
     def acquire_waveforms(self, sources: list[str]) -> dict[str, tuple]:

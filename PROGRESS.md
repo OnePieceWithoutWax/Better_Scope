@@ -197,3 +197,77 @@ Notes for later prompts:
   requested while one is running replaces the pending one.
 - Events CSV exports the rows passing the Event Table filters.
 - No real Tektronix CSV / .wfm sample yet: ask the user for both.
+
+## Prompt 06 -- Live decode (2026-09-29)
+
+The pymeasure fork's `Acquisition` subsystem already has `state`
+(`ACQuire:STATE?`, control), `num_acquisitions` (`ACQuire:NUMACq?`) and
+`stop_after`; the backend uses them.
+
+Design decisions (not dictated by the prompt):
+- `better_scope/live.py`: GUI-agnostic `LiveMonitor` state machine
+  (`poll(running, num_acq) -> LiveAction`, `cycle_done(...)`) plus
+  `live_cycle(scope, sources, stop_first)` (STOP, read NUMACq, transfer,
+  RUN). The GUI drives it from `gui/live_panel.py`.
+- New acquisition = NUMACq changed, or the scope was seen running since the
+  last decode and is now stopped (Single pressed twice gives NUMACq 1 both
+  times), or an app-armed single finished.
+- Stopped + busy: wait, don't skip (the stopped data is still there). Running
+  + decode-while-running + busy: skip and count (NUMACq delta, a counter
+  reset by RUN counts from 0).
+- Decode-while-running RUNs again right after the transfer, not after the
+  decode. "Stop for transfer" is a checkbox (default on) so hardware can show
+  whether the STOP is needed.
+- Arm single: remembers `STOPAfter`, sets SEQuence + RUN; re-arms after each
+  decode while live mode is on; restores `STOPAfter` when disarmed.
+- Plot auto-refresh stays for plain plotting and no longer decodes; it pauses
+  while live mode is on.
+- `DecodeTab.decode(..., on_done)` reports decode duration (or `None` on
+  failure/nothing to decode) so live mode knows when a cycle ends.
+
+Plan:
+- [x] core: `acquisition_status`, `run_acquisition`, `stop_acquisition`,
+      `arm_single`, `set_stop_after`
+- [x] `live.py`: LiveMonitor, LiveAction, live_cycle
+- [x] decode_tab: `decode(on_done=...)`
+- [x] `gui/live_panel.py` + Plot tab row; auto-refresh no longer decodes
+- [x] tests: scripted fake STATE/NUMACq sequences
+- [x] Help text, mark 06 Done (hardware verify pending), commit
+
+Notes for later prompts:
+- Skipped count assumes RUN resets NUMACq; if it does not, the delta after
+  a STOP/RUN cycle is measured from NUMACq at the STOP (handled either way,
+  but can undercount when many acquisitions arrive in one poll).
+- Known gap: a front-panel Single that starts and finishes between two polls
+  (0.3 s) with the same NUMACq as the last decode is not seen. Arm single
+  from the app is reliable.
+- Changing scope settings while stopped resets NUMACq, which reads as a new
+  acquisition and re-decodes the same data (harmless).
+
+## Prompt 07 -- Digital channels (FlexChannel / TLP058) (2026-09-29)
+
+No programmer manual in the repo; query names are from the MSO 4/5/6
+programmer manual as remembered and must be confirmed on hardware:
+`CH<x>:PROBETYPE?` (fork: `channel.probe_type`, DIGITAL/ANALOG),
+`DATa:SOUrce CH<x>_DALL`, `CURVe?` definite-length block, bit n = D<n>.
+
+Design decisions (not dictated by the prompt):
+- `better_scope/digital.py`: source names (`CH1_D0`), IEEE 488.2 block
+  parsing, raw curve -> unsigned ints -> 8 boolean arrays.
+- `BetterScope.digital_channels` detected on connect; `acquire_waveforms`
+  splits `CHx_Dn` requests into one DALL transfer per channel (raw
+  write/read_bytes, encoding saved and restored) and returns `(t, bool)`.
+- Digital sources are `(t, bool_array)` tuples: the engine's `digitize`
+  already takes bool arrays as-is, so no engine change.
+- Plot: bool sources go in their own subplot as stacked 0/1 traces.
+- Decode tab: threshold widgets replaced by "digital (scope threshold)".
+- `.npz`: bool sources stored with `np.packbits` (`s{i}_packed` + count);
+  CSV columns named `CHx_Dn` holding only 0/1 load as bool.
+- Threshold read/write (optional in the prompt) not exposed.
+
+Plan:
+- [ ] `digital.py` + core detection/transfer
+- [ ] waveform_io packbits
+- [ ] plot tab digital subplot; decode tab threshold hiding
+- [ ] tests: fake DALL payload split, UART/SPI decode from bool sources, npz round trip
+- [ ] mark 07 Done (hardware verify pending), follow-up entries, commit

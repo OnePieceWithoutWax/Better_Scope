@@ -18,7 +18,8 @@ pymeasure fork.
    read-back). *Force Trigger* triggers immediately; *Set 50% Level* centers the
    level; live trigger **state** and **frequency** are shown.
 4. **Plot** — Tick the channels to acquire, then press *Acquire* for a single
-   shot, or enable *Auto-refresh* (with a Hz rate) for continuous updates.
+   shot, or enable *Auto-refresh* (with a Hz rate) for continuous plotting
+   (auto-refresh does not decode; see *Live decode* below).
    Long records are drawn min/max decimated to the plot width; zoom in for
    full detail. *Save waveforms...* writes `.npz` (native, keeps the decode
    setup) or `.csv`; *Load waveforms...* reads `.npz`, Tektronix CSV or a
@@ -48,21 +49,30 @@ scope decode license needed).
    the frame layout). Map errors are shown under the binding. PMBus buses use
    the standard command names when no map is bound. *Save map template...*
    writes an example workbook.
-3. **Run** — Every Plot-tab acquisition decodes the enabled buses (their
-   channels are acquired automatically). *Decode* acquires and decodes in one
-   step, or re-decodes the loaded file when no scope is connected. Warnings
-   (e.g. undersampling, a missing channel) appear in the status line and the
+3. **Run** — Every *Acquire* decodes the enabled buses (their channels are
+   acquired automatically). *Decode* acquires and decodes in one step, or
+   re-decodes the loaded file when no scope is connected. Warnings (e.g.
+   undersampling, a missing channel) appear in the status line and the
    *Warnings* list.
-4. **Plot lanes** — Each bus gets a lane under the waveforms, with rows for
+4. **Live decode** (Plot tab) — Polls the scope's acquisition state and
+   transfers + decodes each new acquisition: when the scope stops (Single or
+   Stop on the front panel), and, with *Decode while running*, while it runs
+   (*Stop for transfer* stops the scope during the transfer so every channel
+   comes from one acquisition, then runs it again). *Arm single* sets Stop
+   After = Sequence and runs; with *Live decode* on it re-arms after each
+   decode. Only one transfer + decode runs at a time; acquisitions missed
+   meanwhile are counted as skipped. The row shows the last decode time,
+   transfer and decode durations. Expect it to be slow on long records.
+5. **Plot lanes** — Each bus gets a lane under the waveforms, with rows for
    bits, bytes/words, transactions and register accesses; toggle levels and
    buses on the *Decode:* row. Errors are drawn in red.
-5. **Event Table** — The register command history (time, bus, device, R/W,
+6. **Event Table** — The register command history (time, bus, device, R/W,
    register, value, fields, error) with bus/device/register/errors-only
    filters. Click a row to centre the plot on it.
-6. **Export** — *Export events CSV* writes the rows passing the table's
+7. **Export** — *Export events CSV* writes the rows passing the table's
    filters; *Export frames CSV* writes every frame of the shown levels and
    buses.
-7. **Plugins** — The Decode tab's *Plugins* section lists the decoders found
+8. **Plugins** — The Decode tab's *Plugins* section lists the decoders found
    and any plugin that failed to load.
 
 Writing a decoder: see `docs/DECODERS.md`. Register-map format: see

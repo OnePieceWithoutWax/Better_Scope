@@ -14,7 +14,7 @@ Every prompt assumes you have read this file first.
 | 03 | [03_register_map_excel.md](03_register_map_excel.md) | 02 | Done (2026-09-29) on the default template schema; refit aliases when an example map is supplied |
 | 04 | [04_decode_gui.md](04_decode_gui.md) | 01-03 | Done (2026-09-29) |
 | 05 | [05_waveform_save_and_readback.md](05_waveform_save_and_readback.md) | 01, 04 | Done (2026-09-29) for .npz and CSV; Tek CSV verified only on a synthetic fixture; .wfm waits for a sample file |
-| 06 | [06_live_decode.md](06_live_decode.md) | 04 | Ready (needs hardware to verify) |
+| 06 | [06_live_decode.md](06_live_decode.md) | 04 | Done (2026-09-29) on a scripted fake scope; hardware verification pending |
 | 07 | [07_digital_channels.md](07_digital_channels.md) | 01, 04 | Ready (needs a TLP058 probe to verify) |
 | 08 | [08_svid_decoder.md](08_svid_decoder.md) | 02, 10 | Gated: Intel SVID spec is under NDA |
 | 09 | [09_register_map_formats_and_encodings.md](09_register_map_formats_and_encodings.md) | 03 | Ready after 03 |

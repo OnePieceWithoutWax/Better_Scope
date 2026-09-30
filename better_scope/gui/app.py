@@ -11,6 +11,7 @@ from better_scope.gui.config_tab import ConfigTab
 from better_scope.gui.decode_tab import DecodeTab
 from better_scope.gui.event_table import EventTable
 from better_scope.gui.help_about_tab import HelpAboutTab
+from better_scope.gui.live_panel import LivePanel
 from better_scope.gui.plot_tab import PlotTab
 from better_scope.gui.scope_tab import ScopeTab
 from better_scope.gui.trigger_tab import TriggerTab
@@ -32,6 +33,7 @@ class BetterScopeApp:
         self.capture_tab = CaptureTab(self)
         self.channels_tab = ChannelsTab(self)
         self.trigger_tab = TriggerTab(self)
+        self.live_panel = LivePanel(self)
         self.plot_tab = PlotTab(self)
         self.decode_tab = DecodeTab(self)
         self.event_table = EventTable(self)
@@ -52,6 +54,7 @@ class BetterScopeApp:
         self.trigger_tab.on_connection_changed(connected)
         self.plot_tab.on_connection_changed(connected)
         self.decode_tab.on_connection_changed(connected)
+        self.live_panel.on_connection_changed(connected)
 
     def show_plot_tab(self) -> None:
         """Switch the main tab bar to the Plot tab."""
@@ -100,6 +103,7 @@ class BetterScopeApp:
         while dpg.is_dearpygui_running():
             self.worker.drain()
             self.plot_tab.tick()
+            self.live_panel.tick()
             dpg.render_dearpygui_frame()
 
         dpg.destroy_context()

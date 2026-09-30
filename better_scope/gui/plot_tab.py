@@ -56,6 +56,13 @@ class _Lane:
     rows: list[_Row]
 
 
+def as_float_arrays(waveforms: dict[str, tuple[Any, Any]]) -> dict[str, tuple[Any, Any]]:
+    """Convert acquired ``(t, v)`` pairs to float numpy arrays (worker thread)."""
+    import numpy as np
+
+    return {src: (np.asarray(t, dtype=float), np.asarray(v, dtype=float)) for src, (t, v) in waveforms.items()}
+
+
 class PlotTab:
     """Waveform plot with decode lanes, file save/load, and auto-refresh."""
 
@@ -111,6 +118,8 @@ class PlotTab:
                                enabled=False)
                 dpg.add_button(label="Decode", callback=lambda: self.decode_now())
                 dpg.add_checkbox(label="Auto-refresh", tag=self.auto_tag, default_value=False)
+                with dpg.tooltip(dpg.last_item()):
+                    dpg.add_text("Re-acquire and plot on a timer. Does not decode; use Live decode for that.")
                 dpg.add_input_float(
                     label="Hz",
                     tag=self.hz_tag,
@@ -126,6 +135,7 @@ class PlotTab:
                 dpg.add_button(label="Save waveforms...", callback=lambda: self._show_save_dialog())
                 dpg.add_button(label="Load waveforms...", callback=lambda: self._show_load_dialog())
                 dpg.add_button(label="Event Table", callback=lambda: self.app.event_table.show())
+            self.app.live_panel.build()
             with dpg.group(horizontal=True):
                 dpg.add_text("Sources:")
                 dpg.add_group(tag=self.sources_tag, horizontal=True)
@@ -199,44 +209,61 @@ class PlotTab:
 
     # -- acquisition -----------------------------------------------------------
 
-    def acquire(self) -> None:
-        """Acquire the checked channels plus those the enabled buses need (worker thread)."""
-        if self._busy or not self.app.scope.is_connected():
-            return
+    def acquire_sources(self) -> list[str]:
+        """Channels to transfer: the checked ones plus those the enabled buses need."""
         channels = self._channel_sources()
         sources = [s for s in channels if s in self._checked]
         sources += [s for s in self.app.decode_tab.required_sources() if s in channels and s not in sources]
+        return sources
+
+    @property
+    def busy(self) -> bool:
+        """Whether a Plot-tab acquisition is in progress."""
+        return self._busy
+
+    def acquire(self, decode: bool = True) -> None:
+        """Acquire :meth:`acquire_sources` on the worker thread.
+
+        Args:
+            decode: Decode the new data afterwards (the auto-refresh timer
+                only plots).
+        """
+        if self._busy or self.app.live_panel.visa_busy or not self.app.scope.is_connected():
+            return
+        sources = self.acquire_sources()
         if not sources:
             self.set_status("Select at least one channel.")
             return
 
         def work() -> dict[str, tuple[Any, Any]]:
-            import numpy as np
-
-            raw = self.app.scope.acquire_waveforms(sources)
-            return {src: (np.asarray(t, dtype=float), np.asarray(v, dtype=float)) for src, (t, v) in raw.items()}
+            return as_float_arrays(self.app.scope.acquire_waveforms(sources))
 
         self._busy = True
         self._last_acquire = time.monotonic()
         self.set_status(f"Acquiring {', '.join(sources)}...")
-        self.app.worker.submit(work, self._on_acquired, self._on_error)
+        self.app.worker.submit(work, lambda waves: self._on_acquired(waves, decode), self._on_error)
 
-    def _on_acquired(self, waveforms: dict[str, tuple[Any, Any]]) -> None:
-        """Main thread: store the new data, redraw, and decode."""
+    def _on_acquired(self, waveforms: dict[str, tuple[Any, Any]], decode: bool) -> None:
+        """Main thread: store the new data, redraw, and optionally decode."""
         self._busy = False
+        self.show_acquired(waveforms)
+        self.set_status(f"Acquired {len(waveforms)} channel(s).")
+        if decode:
+            self.app.decode_tab.decode(self.waveforms)
+
+    def show_acquired(self, waveforms: dict[str, tuple[Any, Any]]) -> None:
+        """Main thread: replace the acquired (non-file) sources and redraw."""
         before = self._displayed()
         had_data = bool(self.waveforms)
         for source in [s for s in self.waveforms if not s.startswith(FILE_PREFIX)]:
             del self.waveforms[source]
         self.waveforms.update(waveforms)
-        self.set_status(f"Acquired {len(waveforms)} channel(s).")
         if self._displayed() != before:
             self._rebuild_plot()
         else:
             self._view_key = None
         if not had_data:
             self._fit_pending = True
-        self.app.decode_tab.decode(self.waveforms)
 
     def decode_now(self) -> None:
         """Acquire and decode when connected; otherwise decode the loaded data."""
@@ -502,9 +529,11 @@ class PlotTab:
 
         if self._busy or not dpg.get_value(self.auto_tag) or not self.app.scope.is_connected():
             return
+        if self.app.live_panel.monitor.polling:
+            return
         hz = max(0.2, float(dpg.get_value(self.hz_tag) or 1.0))
         if time.monotonic() - self._last_acquire >= 1.0 / hz:
-            self.acquire()
+            self.acquire(decode=False)
 
     def _redraw(self, x_min: float, x_max: float) -> None:
         """Re-decimate the visible waveforms and redraw the lanes for ``[x_min, x_max]``."""
