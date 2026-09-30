@@ -1,7 +1,9 @@
 """Run bus configurations over captured waveforms.
 
 :func:`run` digitizes each source once per threshold setting, runs each bus's
-base decoder, then its stacked layers bottom-up. Problems with one bus
+base decoder, then its stacked layers bottom-up. Before each layer runs it
+receives the static hints of the layers above it
+(:meth:`~better_scope.decode.api.Decoder.hints_for_lower`). Problems with one bus
 (unknown decoder, unmapped role, bad option, decoder exception) become
 warnings on the result; the other buses still decode.
 """
@@ -140,6 +142,8 @@ def _run_bus(bus: BusConfig, cache: _SignalCache, registry: DecoderRegistry, res
     below: list[Frame] = []
     for index, cls in enumerate(chain):
         decoder = cls(bus_id=bus.bus_id)
+        for upper in reversed(chain[index + 1:]):
+            decoder.hints.update(upper.hints_for_lower(dict(opts)))
         if index == 0:
             layer = list(decoder.decode(signals, dict(opts)))
         else:

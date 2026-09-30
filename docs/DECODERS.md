@@ -208,6 +208,51 @@ every layer bottom-up:
 - Frames from every layer carry the bus's `bus_id` and their own
   `decoder_id`.
 
+### The built-in stack: `i2c -> smbus -> pmbus`
+
+Each layer consumes one frame kind from the layer below and adds meaning:
+
+| Layer | Consumes | Emits (main frame) |
+|-------|----------|--------------------|
+| `i2c` | SCL/SDA signals | `transaction` at `Level.PACKET`, `data["segments"]` = one dict per START/Sr segment (`address`, `read`, `address_ack`, `data`, `acks`, `spans`) plus `complete` and `max_scl_low` |
+| `smbus` | i2c `transaction` frames | `transaction` at `Level.PACKET`: `type` (`write_word`, `block_read`, ...), `command`, `data`, `pec`, `pec_ok` |
+| `pmbus` | smbus `transaction` frames | `command` at `Level.SEMANTIC`: `name` (`VOUT_COMMAND`, ...), `direction`, `data` |
+
+A private protocol on SMBus (say a vendor's register protocol) would set
+`stacks_on = "smbus"` and read `f.data["command"]` and `f.data["data"]` from
+the smbus `transaction` frames, exactly as `pmbus.py` does.
+
+### Passing hints down
+
+Frames only flow upward, but sometimes a lower layer needs knowledge that
+only an upper layer has. SMBus can't tell a trailing PEC byte from one more
+data byte unless it knows how many data bytes the command carries, and only
+PMBus knows that. For this, a decoder can override the classmethod
+`hints_for_lower(opts)` and return a dict of **static** hints. Before each
+layer runs, the engine merges the hints of every layer above it into
+`self.hints` (the nearest layer wins on a key clash):
+
+```python
+from better_scope.decode.decoders.smbus import BLOCK, COMMAND_SIZES_HINT, CommandSize
+
+
+class MyVendorProtocol(Decoder):
+    id = "my_device"
+    name = "My device (SMBus)"
+    stacks_on = "smbus"
+
+    @classmethod
+    def hints_for_lower(cls, opts):
+        return {COMMAND_SIZES_HINT: {
+            0xD0: CommandSize(write=2, read=2),        # a word register
+            0xD1: CommandSize(write=None, read=BLOCK), # read-only block
+        }}
+```
+
+Namespace hint keys by the decoder that reads them (`"smbus.command_sizes"`).
+Hints are per run, not per frame; they can depend on options but not on the
+decoded data.
+
 ## Where to put the file
 
 The registry scans these locations in order. When two classes share an `id`,
@@ -255,6 +300,20 @@ t, v = uart_waveform([0x41, 0x42], 115200, parity="even", parity_errors=[1], noi
 bus = BusConfig("u", "UART", "uart", role_map={"rx": "CH1"}, options={"baud": 115200, "parity": "even"})
 result = run([bus], {"CH1": (t, v)})
 assert result.for_bus("u", Level.WORD)[1].error == "parity error"
+```
+
+For clocked buses, `i2c_waveform` and `spi_waveform` return one waveform per
+line:
+
+```python
+from tests.signals import I2cSegment, i2c_waveform, spi_waveform
+
+# I2C: transactions of segments (repeated START between segments), NACKs, clock stretching
+scl, sda = i2c_waveform([[I2cSegment(0x40, data=[0x8B]), I2cSegment(0x40, read=True, data=[0x34, 0x12])]],
+                        400e3, stretch_bits=2)
+
+# SPI: per CS assertion, (mosi, miso) words; returns {"sclk", "mosi", "miso", "cs"}
+waves = spi_waveform([[(0xA5, 0x3C)]], 1e6, mode=3, word_size=8, partial_bits=3)
 ```
 
 To test a plugin file without installing it, point a `DecoderRegistry` at a

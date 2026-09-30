@@ -55,7 +55,46 @@ Plan:
 Notes for later prompts:
 - UART marks a first character that framed cleanly without enough preceding
   idle as `data["uncertain"] = True` (capture may have started mid-stream).
-- PMBus -> SMBus PEC size hints (prompt 02) need a feedback path; the engine
-  currently only passes frames upward. Options: PMBus re-checks PEC itself, or
-  add a hint hook to the stacked-decoder API.
+- PMBus -> SMBus PEC size hints: resolved in prompt 02 (`hints_for_lower`).
 - 11M-sample UART record decodes in ~2.6 s (digitize + frame building).
+
+## Prompt 02 -- I2C, SMBus, PMBus, SPI decoders (2026-09-29)
+
+Design decisions (not dictated by the prompt):
+- PEC size hints: a generic downward hint hook instead of PMBus re-checking
+  PEC. `Decoder.hints_for_lower(opts)` (classmethod, default `{}`) returns
+  static hints; the engine merges the hints of every layer above a decoder
+  (nearest wins) into `decoder.hints` before it runs. PMBus publishes
+  `smbus.command_sizes` = {code: CommandSize(write, read)} from its command
+  table; SMBus uses it to place the PEC byte and pick the transaction type.
+  Static per-command sizes are all PMBus needs, and the hook stays reusable
+  for private stacks (prompt 10).
+- PMBus command table sourced from PMBus Part II rev 1.3.1 (2015-03-13,
+  free on pmbus.org), Table 31. Rev 1.3.1 names C4h-FDh MFR_SPECIFIC_xx
+  (the prompt said D0h-FDh); the spec wins.
+- SMBus timeout check works from the I2C transaction's longest SCL-low
+  interval (`max_scl_low` in the I2C level-2 frame data), 25 ms = tTIMEOUT,MIN.
+- SPI no-CS idle gap is in clock periods (median sample-edge spacing), default 10.
+
+Plan:
+- [x] api.py / engine.py: hints hook + test
+- [x] decoders/i2c.py
+- [x] decoders/smbus.py (CRC-8, classification, PEC off/on/auto, timeout)
+- [x] decoders/pmbus_commands.py + decoders/pmbus.py
+- [x] decoders/spi.py
+- [x] tests/signals.py: i2c_waveform, spi_waveform
+- [x] tests: i2c, smbus, pmbus, spi
+- [x] docs/DECODERS.md: stacking example + hints; mark 02 Done
+- [x] uv run pytest green, commit
+
+Notes for later prompts:
+- Register mapper (03): PMBus default map = `pmbus_commands.COMMANDS`
+  (code -> name, write/read SMBus protocol, data_bytes). PMBus semantic frames
+  carry `command`, `name`, `direction`, `data`; SMBus frames carry `type`,
+  `command`, `count`, `write_data`, `read_data`, `data`, `pec_ok`.
+- A user map could also feed `smbus.command_sizes` hints (sizes for MFR
+  codes) so PEC auto works for manufacturer commands; not done yet.
+- Without hints, SMBus prefers fixed sizes over block shapes: a Block Write
+  of count 1 looks like a Write Word, count 3 like a Write 32.
+- PEC auto without hints cannot catch a bad PEC (it just looks like data).
+- 4.8M-sample PMBus record (2000 commands) decodes in ~0.55 s.

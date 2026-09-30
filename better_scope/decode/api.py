@@ -121,11 +121,32 @@ class Decoder:
     def __init__(self, bus_id: str = "") -> None:
         self.bus_id = bus_id
         self.warnings: list[str] = []
+        # Hints from the layers stacked above this one (see hints_for_lower).
+        self.hints: dict[str, Any] = {}
 
     @classmethod
     def default_options(cls) -> dict[str, Any]:
         """Option id -> default value."""
         return {opt.id: opt.default for opt in cls.options}
+
+    @classmethod
+    def hints_for_lower(cls, opts: dict[str, Any]) -> dict[str, Any]:
+        """Static hints this decoder offers the layers below it.
+
+        Frames only flow upward, but a lower layer sometimes needs knowledge
+        only an upper layer has (PMBus knows each command's data size, which
+        SMBus needs to find the PEC byte). Before a decoder runs, the engine
+        merges the hints of every layer above it into ``self.hints``; the
+        nearest layer wins on a key clash. Namespace keys by the consuming
+        decoder, e.g. ``"smbus.command_sizes"``.
+
+        Args:
+            opts: Every option of the stack, validated, with defaults filled in.
+
+        Returns:
+            Hint key -> value (empty by default).
+        """
+        return {}
 
     def frame(
         self,

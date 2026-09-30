@@ -145,3 +145,59 @@ def test_plugin_decoder_runs_through_engine(tmp_path: Path, plugin_dir: Path) ->
     result = run([bus], {"D0": (t, levels)}, registry=reg)
     assert result.for_bus("e", Level.PACKET)[0].data == {"edges": 10}
     assert result.for_bus("e", Level.SEMANTIC)[0].text == ("10 edges",)
+
+
+PLUGIN_HINTS = '''
+from better_scope.decode.api import Decoder, Role
+from better_scope.decode.model import Level
+
+
+class HintBase(Decoder):
+    id = "hint_base"
+    name = "Hint base"
+    roles = (Role("in", "Input"),)
+
+    def decode(self, signals, opts):
+        sig = signals["in"]
+        yield self.frame(sig.t_start, sig.t_end, "hints", Level.PACKET, data=dict(self.hints))
+
+
+class HintMiddle(Decoder):
+    id = "hint_middle"
+    name = "Hint middle"
+    stacks_on = "hint_base"
+
+    @classmethod
+    def hints_for_lower(cls, opts):
+        return {"shared": "middle", "middle_only": 1}
+
+    def decode_frames(self, frames, opts):
+        yield from ()
+
+
+class HintTop(Decoder):
+    id = "hint_top"
+    name = "Hint top"
+    stacks_on = "hint_middle"
+
+    @classmethod
+    def hints_for_lower(cls, opts):
+        return {"shared": "top", "top_only": 2}
+
+    def decode_frames(self, frames, opts):
+        yield from ()
+'''
+
+
+def test_hints_flow_down_nearest_wins(tmp_path: Path, plugin_dir: Path) -> None:
+    import numpy as np
+
+    from better_scope.decode import BusConfig, Level, run
+
+    (plugin_dir / "hints.py").write_text(PLUGIN_HINTS)
+    reg = _registry(tmp_path)
+    t = np.arange(4) * 1e-6
+    bus = BusConfig("h", "Hints", "hint_top", role_map={"in": "D0"})
+    result = run([bus], {"D0": (t, np.array([0, 1, 1, 0], dtype=bool))}, registry=reg)
+    (frame,) = result.for_bus("h", Level.PACKET)
+    assert frame.data == {"shared": "middle", "middle_only": 1, "top_only": 2}

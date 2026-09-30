@@ -161,3 +161,186 @@ def uart_waveform(
         segs, baud * samples_per_bit, v_low=v_low, v_high=v_high,
         edge_time=edge_fraction * bit, noise=noise, offset=offset, seed=seed,
     )
+
+
+@dataclass(frozen=True)
+class I2cSegment:
+    """One addressed part of an I2C transaction (START/Sr to the next Sr/STOP).
+
+    Attributes:
+        address: 7-bit address, or a 10-bit address when ``ten_bit``.
+        read: R/W bit.
+        data: Bytes written by the controller or returned by the target.
+        address_ack: Whether the target ACKs its address. On a NACK the
+            controller sends STOP and later segments are dropped.
+        nack_data: Indices of written bytes the target NACKs.
+        ten_bit: Send a 10-bit address header (11110 + A9:A8).
+    """
+
+    address: int
+    read: bool = False
+    data: Sequence[int] = ()
+    address_ack: bool = True
+    nack_data: Sequence[int] = ()
+    ten_bit: bool = False
+
+
+def i2c_steps(
+    transactions: Sequence[Sequence[I2cSegment]],
+    *,
+    idle_bits: float = 4.0,
+    stretch_bits: float = 0.0,
+) -> list[tuple[bool, bool, float]]:
+    """I2C bus states as ``(scl, sda, duration_in_bits)`` steps.
+
+    Each bit is four quarter-bit steps: SCL low holding the old SDA, SCL low
+    with the new SDA, then SCL high for half a bit.
+
+    Args:
+        transactions: Transactions, each a list of segments joined by repeated STARTs.
+        idle_bits: Bus-idle time before, between and after transactions.
+        stretch_bits: Extra SCL-low time before every ACK clock (clock stretching).
+
+    Returns:
+        The steps.
+    """
+    q = 0.25
+    steps: list[tuple[bool, bool, float]] = [(True, True, idle_bits)]
+    sda = True
+
+    def bit(value: int, stretch: float = 0.0) -> None:
+        nonlocal sda
+        steps.append((False, sda, q))
+        sda = bool(value)
+        steps.append((False, sda, q + stretch))
+        steps.append((True, sda, 2 * q))
+
+    def byte(value: int, ack: bool) -> None:
+        for i in range(7, -1, -1):
+            bit((value >> i) & 1)
+        bit(0 if ack else 1, stretch_bits)
+
+    for txn in transactions:
+        # START: SDA falls while SCL is high.
+        steps.append((True, False, q))
+        sda = False
+        for index, seg in enumerate(txn):
+            if index:
+                # Repeated START: release SDA with SCL low, raise SCL, pull SDA low.
+                steps += [(False, sda, q), (False, True, q), (True, True, q), (True, False, q)]
+                sda = False
+            if seg.ten_bit:
+                byte(0b11110000 | ((seg.address >> 7) & 0b110) | int(seg.read), seg.address_ack)
+                byte(seg.address & 0xFF, seg.address_ack)
+            else:
+                byte((seg.address << 1) | int(seg.read), seg.address_ack)
+            if not seg.address_ack:
+                break
+            for i, value in enumerate(seg.data):
+                ack = i != len(seg.data) - 1 if seg.read else i not in seg.nack_data
+                byte(value, ack)
+        # STOP: SDA rises while SCL is high.
+        steps += [(False, sda, q), (False, False, q), (True, False, q), (True, True, idle_bits)]
+        sda = True
+    return steps
+
+
+def i2c_waveform(
+    transactions: Sequence[Sequence[I2cSegment]],
+    freq: float,
+    *,
+    samples_per_bit: float = 40.0,
+    edge_fraction: float = 0.05,
+    noise: float = 0.02,
+    v_high: float = 3.3,
+    seed: int = 0,
+    **step_kwargs: float,
+) -> tuple[tuple[np.ndarray, np.ndarray], tuple[np.ndarray, np.ndarray]]:
+    """Analog SCL and SDA waveforms.
+
+    Args:
+        transactions: Transactions, each a list of :class:`I2cSegment`.
+        freq: SCL frequency in Hz.
+        samples_per_bit: Oversampling ratio.
+        edge_fraction: Edge time as a fraction of a bit.
+        noise: Noise std-dev as a fraction of the swing.
+        v_high: Pull-up voltage.
+        seed: RNG seed (SDA uses ``seed + 1``).
+        **step_kwargs: Passed to :func:`i2c_steps`.
+
+    Returns:
+        ``((t, scl), (t, sda))``.
+    """
+    bit = 1.0 / freq
+    steps = i2c_steps(transactions, **step_kwargs)
+    common = dict(v_high=v_high, edge_time=edge_fraction * bit, noise=noise)
+    scl = levels_waveform([(c, d * bit) for c, _, d in steps], freq * samples_per_bit, seed=seed, **common)
+    sda = levels_waveform([(s, d * bit) for _, s, d in steps], freq * samples_per_bit, seed=seed + 1, **common)
+    return scl, sda
+
+
+def spi_waveform(
+    transactions: Sequence[Sequence[tuple[int, int]]],
+    freq: float,
+    *,
+    mode: int = 0,
+    word_size: int = 8,
+    lsb_first: bool = False,
+    cs_active_low: bool = True,
+    gap_clocks: float = 20.0,
+    partial_bits: int = 0,
+    samples_per_bit: float = 20.0,
+    edge_fraction: float = 0.05,
+    noise: float = 0.02,
+    seed: int = 0,
+) -> dict[str, tuple[np.ndarray, np.ndarray]]:
+    """Analog SPI waveforms.
+
+    Args:
+        transactions: Per CS assertion, a list of ``(mosi, miso)`` words.
+        freq: SCLK frequency in Hz.
+        mode: SPI mode 0-3 (CPOL * 2 + CPHA).
+        word_size: Bits per word.
+        lsb_first: Bit order.
+        cs_active_low: CS polarity.
+        gap_clocks: Idle time around and between transactions, in clocks.
+        partial_bits: Extra clock cycles (zeros) at the end of the last
+            transaction, making an incomplete word.
+        samples_per_bit: Oversampling ratio.
+        edge_fraction: Edge time as a fraction of a clock period.
+        noise: Noise std-dev as a fraction of the swing.
+        seed: RNG seed (each line offsets it).
+
+    Returns:
+        ``{"sclk": (t, v), "mosi": ..., "miso": ..., "cs": ...}``.
+    """
+    cpol, cpha = bool(mode & 2), bool(mode & 1)
+    h = 0.5
+    cs_on = not cs_active_low
+    # Steps: (sclk, mosi, miso, cs, duration_in_clocks)
+    steps: list[tuple[bool, bool, bool, bool, float]] = [(cpol, False, False, not cs_on, gap_clocks)]
+    for index, words in enumerate(transactions):
+        bits: list[tuple[int, int]] = []
+        for mosi, miso in words:
+            order = range(word_size) if lsb_first else range(word_size - 1, -1, -1)
+            bits += [((mosi >> i) & 1, (miso >> i) & 1) for i in order]
+        if index == len(transactions) - 1:
+            bits += [(0, 0)] * partial_bits
+        steps.append((cpol, False, False, cs_on, h))
+        for mo, mi in bits:
+            if cpha:
+                # Data changes on the leading edge, sampled on the trailing edge.
+                steps += [(not cpol, bool(mo), bool(mi), cs_on, h), (cpol, bool(mo), bool(mi), cs_on, h)]
+            else:
+                # Data set up in the idle half, sampled on the leading edge.
+                steps += [(cpol, bool(mo), bool(mi), cs_on, h), (not cpol, bool(mo), bool(mi), cs_on, h)]
+        steps.append((cpol, False, False, cs_on, h))
+        steps.append((cpol, False, False, not cs_on, gap_clocks))
+
+    period = 1.0 / freq
+    rate = freq * samples_per_bit
+    common = dict(edge_time=edge_fraction * period, noise=noise)
+    return {
+        name: levels_waveform([(s[i], s[4] * period) for s in steps], rate, seed=seed + i, **common)
+        for i, name in enumerate(("sclk", "mosi", "miso", "cs"))
+    }

@@ -45,5 +45,5 @@ Tests run without hardware (VISA discovery and the pymeasure driver are mocked).
 - `better_scope/instruments/` — VISA discovery and the pymeasure driver wrapper.
 - `better_scope/gui/` — DearPyGui app shell, worker thread, and tabs.
 - `better_scope/decode/` — GUI-agnostic software serial decoder with a plugin
-  API (UART so far). See [docs/DECODERS.md](docs/DECODERS.md) to write a decoder.
+  API (UART, I2C, SMBus, PMBus, SPI). See [docs/DECODERS.md](docs/DECODERS.md) to write a decoder.
 - `main.py` — entry point.
